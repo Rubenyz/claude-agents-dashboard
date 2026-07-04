@@ -63,6 +63,40 @@ STATUS_OTHER = ("#5f6368", "#eef0f2")
 QDBUS = next((p for p in ("/usr/bin/qdbus6", "/usr/bin/qdbus", "/usr/bin/qdbus-qt6")
              if os.path.exists(p)), "qdbus6")
 
+PREFS_PATH = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+    "claude-agents-dashboard.json")
+
+
+def _load_prefs():
+    try:
+        with open(PREFS_PATH) as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        d = {}
+    try:
+        scale = min(1.6, max(0.7, float(d.get("scale", 1.0))))
+        cols = min(4, max(1, int(d.get("cols", 1))))
+    except (TypeError, ValueError):
+        scale, cols = 1.0, 1
+    return {"scale": scale, "cols": cols}
+
+
+PREFS = _load_prefs()
+
+
+def save_prefs():
+    try:
+        with open(PREFS_PATH, "w") as fh:
+            json.dump(PREFS, fh)
+    except OSError:
+        pass
+
+
+def px(n):
+    """Font size in pixels, scaled with the user's zoom preference."""
+    return max(8, int(round(n * PREFS["scale"])))
+
 
 def pid_alive(pid):
     try:
@@ -652,11 +686,11 @@ class AgentRow(QtWidgets.QWidget):
         # Line 1: name + status pill.
         top = QtWidgets.QHBoxLayout()
         top.setSpacing(8)
-        name = ElidedLabel(display_name(data), "#1f2328", 15, bold=True)
+        name = ElidedLabel(display_name(data), "#1f2328", px(15), bold=True)
         pill = QtWidgets.QLabel(label)
         pill.setStyleSheet(
-            "color: %s; background: %s; font-size: 12px; font-weight: 600;"
-            " padding: 1px 8px; border-radius: 8px;" % (fg, bg))
+            "color: %s; background: %s; font-size: %dpx; font-weight: 600;"
+            " padding: 1px 8px; border-radius: 8px;" % (fg, bg, px(12)))
         pill.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
         top.addWidget(name, 1)
         top.addWidget(pill, 0)
@@ -664,14 +698,14 @@ class AgentRow(QtWidgets.QWidget):
 
         # Line 2: your last message (wraps over multiple lines).
         if last_msg:
-            body.addWidget(WrapLabel("❯ " + last_msg, "#4a5159", 13))
+            body.addWidget(WrapLabel("❯ " + last_msg, "#4a5159", px(13)))
 
         # Line 3: recap (Claude's latest answer).
         if recap:
-            body.addWidget(WrapLabel("↳ " + recap, "#6e7781", 13, italic=True))
+            body.addWidget(WrapLabel("↳ " + recap, "#6e7781", px(13), italic=True))
 
         # Line 4: working directory.
-        body.addWidget(ElidedLabel(short_cwd(data.get("cwd", "")), "#8c959f", 12))
+        body.addWidget(ElidedLabel(short_cwd(data.get("cwd", "")), "#8c959f", px(12)))
 
         # Line 5: model · effort · mode · context-%.
         bits = []
@@ -684,7 +718,7 @@ class AgentRow(QtWidgets.QWidget):
         if meta.get("ctx") is not None:
             bits.append("context %d%%" % meta["ctx"])
         if bits:
-            body.addWidget(ElidedLabel("  ·  ".join(bits), "#aab2bd", 12))
+            body.addWidget(ElidedLabel("  ·  ".join(bits), "#aab2bd", px(12)))
 
         self._body = body
         root.addLayout(body, 1)
@@ -715,8 +749,8 @@ class SectionRow(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(14, 5, 14, 4)
         lbl = QtWidgets.QLabel(text)
-        lbl.setStyleSheet("color: %s; font-size: 12px; font-weight: 700;"
-                          % ("#8a6d1a" if accent else "#57606a"))
+        lbl.setStyleSheet("color: %s; font-size: %dpx; font-weight: 700;"
+                          % ("#8a6d1a" if accent else "#57606a", px(12)))
         lay.addWidget(lbl)
 
     def height_for_width(self, w):
@@ -757,18 +791,18 @@ class ResumeRow(QtWidgets.QWidget):
 
         top = QtWidgets.QHBoxLayout()
         top.setSpacing(8)
-        top.addWidget(ElidedLabel(title, "#1f2328", 15, bold=True), 1)
+        top.addWidget(ElidedLabel(title, "#1f2328", px(15), bold=True), 1)
         if when:
             wl = QtWidgets.QLabel(when)
-            wl.setStyleSheet("color: #8c959f; font-size: 12px;")
+            wl.setStyleSheet("color: #8c959f; font-size: %dpx;" % px(12))
             wl.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
             top.addWidget(wl, 0)
         body.addLayout(top)
 
         for text, col, italic in lines:
-            body.addWidget(WrapLabel(text, col, 13, italic=italic))
+            body.addWidget(WrapLabel(text, col, px(13), italic=italic))
         for text in footers:
-            body.addWidget(ElidedLabel(text, "#8c959f", 12))
+            body.addWidget(ElidedLabel(text, "#8c959f", px(12)))
         root.addLayout(body, 1)
 
     def height_for_width(self, w):
@@ -793,16 +827,63 @@ class ResumeRow(QtWidgets.QWidget):
         menu.exec_(event.globalPos())
 
 
+LIST_CSS = (
+    "QListWidget { border: none; background: #ffffff; outline: 0; }"
+    " QListWidget::item { border-bottom: 1px solid #eaecef; }"
+    " QListWidget::item:selected { background: transparent; }"
+    " QScrollBar:vertical { background: transparent; width: 10px;"
+    "   margin: 2px 2px 2px 0; border: none; }"
+    " QScrollBar::handle:vertical { background: #d0d7de;"
+    "   border-radius: 4px; min-height: 28px; }"
+    " QScrollBar::handle:vertical:hover { background: #aab2bd; }"
+    " QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical"
+    "   { height: 0; background: transparent; }"
+    " QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical"
+    "   { background: transparent; }")
+
+
 class AgentList(QtWidgets.QListWidget):
-    """Keeps the row width equal to the viewport so text elides instead of scrolling."""
+    """Keeps the cell width equal to the viewport (divided over the configured
+    number of columns) so text elides/wraps instead of scrolling horizontally."""
+
+    def __init__(self):
+        super().__init__()
+        self.setStyleSheet(LIST_CSS)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                           QtWidgets.QSizePolicy.Expanding)
+
+    def apply_columns(self):
+        if PREFS["cols"] > 1:
+            self.setFlow(QtWidgets.QListView.LeftToRight)
+            self.setWrapping(True)
+            self.setResizeMode(QtWidgets.QListView.Adjust)
+            # Keep the scrollbar permanently visible: with it toggling on/off
+            # the viewport width oscillates and the wrap layout flickers.
+            self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
+        else:
+            self.setFlow(QtWidgets.QListView.TopToBottom)
+            self.setWrapping(False)
+            self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.relayout()
+
+    def cell_width(self):
+        w = self.viewport().width()
+        if self.flow() == QtWidgets.QListView.LeftToRight:
+            return max(1, w // PREFS["cols"] - 1)
+        return w
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.relayout()
 
     def relayout(self):
-        """Recompute every row height at the current viewport width."""
-        w = self.viewport().width()
+        """Recompute every row height at the current cell width."""
+        w = self.cell_width()
         if w <= 1:
             return
         for i in range(self.count()):
@@ -822,31 +903,94 @@ class Dashboard(QtWidgets.QWidget):
         self.setStyleSheet("background: #ffffff;")
         self._raise_seq = 0
         self._sized = False
+        self._sig = None
 
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
+        # Toolbar: title + zoom buttons + view menu.
+        bar = QtWidgets.QWidget()
+        bar.setStyleSheet(
+            "background: #f6f8fa; border-bottom: 1px solid #d0d7de;")
+        barlay = QtWidgets.QHBoxLayout(bar)
+        barlay.setContentsMargins(14, 8, 10, 8)
+        barlay.setSpacing(6)
+
         self.header = QtWidgets.QLabel()
         self.header.setStyleSheet(
-            "background: #f6f8fa; color: #1f2328; font-weight: 600;"
-            " font-size: 15px; padding: 12px 14px;"
-            " border-bottom: 1px solid #d0d7de;")
-        outer.addWidget(self.header)
+            "color: #1f2328; font-weight: 600; font-size: 15px; border: none;")
+        barlay.addWidget(self.header, 1)
+
+        btn_css = (
+            "QToolButton { color: #57606a; background: transparent; border: none;"
+            " border-radius: 6px; font-size: 14px; font-weight: 600;"
+            " padding: 3px 9px; }"
+            " QToolButton:hover { background: #e7ebef; }"
+            " QToolButton::menu-indicator { image: none; }")
+
+        def _btn(text, tip, fn=None):
+            b = QtWidgets.QToolButton()
+            b.setText(text)
+            b.setToolTip(tip)
+            b.setStyleSheet(btn_css)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            if fn:
+                b.clicked.connect(fn)
+            barlay.addWidget(b, 0)
+            return b
+
+        _btn("A−", "Smaller text", lambda: self.bump_scale(-0.1))
+        _btn("A+", "Larger text", lambda: self.bump_scale(+0.1))
+
+        view_btn = _btn("☰", "View options")
+        view_menu = QtWidgets.QMenu(self)
+        group = QtWidgets.QActionGroup(self)
+        for n, label in ((1, "1 column"), (2, "2 columns"),
+                         (3, "3 columns (Active / Pick up / History)")):
+            act = view_menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(PREFS["cols"] == n)
+            act.triggered.connect(lambda _=False, n=n: self.set_cols(n))
+            group.addAction(act)
+        view_menu.addSeparator()
+        reset = view_menu.addAction("Reset text size")
+        reset.triggered.connect(lambda: self.bump_scale(1.0 - PREFS["scale"]))
+        view_btn.setMenu(view_menu)
+        view_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+
+        outer.addWidget(bar)
 
         self.list = AgentList()
-        self.list.setStyleSheet(
-            "QListWidget { border: none; background: #ffffff; outline: 0; }"
-            " QListWidget::item { border-bottom: 1px solid #eaecef; }"
-            " QListWidget::item:selected { background: transparent; }")
-        self.list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        self.list.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        self.list.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
-        self.list.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        self.list.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
-                                QtWidgets.QSizePolicy.Expanding)
+        self.list.apply_columns()
         outer.addWidget(self.list, 1)
+
+        # Category view (3 columns): Active / Pick up / History side by side.
+        self.cats = QtWidgets.QWidget()
+        cat_lay = QtWidgets.QHBoxLayout(self.cats)
+        cat_lay.setContentsMargins(0, 0, 0, 0)
+        cat_lay.setSpacing(0)
+        self.cat_lists, self.cat_headers = [], []
+        for i in range(3):
+            if i:
+                sep = QtWidgets.QFrame()
+                sep.setFixedWidth(1)
+                sep.setStyleSheet("background: #d0d7de;")
+                cat_lay.addWidget(sep)
+            col = QtWidgets.QWidget()
+            v = QtWidgets.QVBoxLayout(col)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(0)
+            hdr = QtWidgets.QLabel()
+            v.addWidget(hdr)
+            lst = AgentList()
+            v.addWidget(lst, 1)
+            self.cat_headers.append(hdr)
+            self.cat_lists.append(lst)
+            cat_lay.addWidget(col, 1)
+        self._style_cat_headers()
+        self.cats.setVisible(False)
+        outer.addWidget(self.cats, 1)
 
         self.empty = QtWidgets.QLabel("No active or recent Claude sessions")
         self.empty.setAlignment(QtCore.Qt.AlignCenter)
@@ -855,9 +999,39 @@ class Dashboard(QtWidgets.QWidget):
 
         self.count = 0
 
+    def _style_cat_headers(self, counts=None):
+        titles = ["Active", "📌 Pick up", "History"]
+        if counts:
+            titles = ["%s — %d" % (t, n) for t, n in zip(titles, counts)]
+        for i, hdr in enumerate(self.cat_headers):
+            hdr.setText(titles[i])
+            hdr.setStyleSheet(
+                "background: %s; color: %s; font-size: %dpx; font-weight: 700;"
+                " padding: 5px 14px; border-bottom: 1px solid #d0d7de;"
+                % ("#fdf6e3" if i == 1 else "#f6f8fa",
+                   "#8a6d1a" if i == 1 else "#57606a", px(12)))
+
+    def bump_scale(self, delta):
+        PREFS["scale"] = min(1.6, max(0.7, round(PREFS["scale"] + delta, 2)))
+        save_prefs()
+        self.refresh()
+
+    def set_cols(self, n):
+        PREFS["cols"] = n
+        save_prefs()
+        self.list.apply_columns()
+        self.refresh()
+
+    def _visible_lists(self):
+        return self.cat_lists if PREFS["cols"] == 3 else [self.list]
+
     def refresh(self):
         if QtWidgets.QApplication.activePopupWidget() is not None:
             return self.count  # do not rebuild while a context menu is open
+        lists = self._visible_lists()
+        if any(l.verticalScrollBar().isSliderDown() for l in lists):
+            return self.count  # do not rebuild while the user is dragging
+        scroll_pos = [l.verticalScrollBar().value() for l in lists]
         agents = load_agents()
         last_msgs = load_last_messages()
         self.count = len(agents)
@@ -865,34 +1039,70 @@ class Dashboard(QtWidgets.QWidget):
         active_sids = {a.get("sessionId", "") for a in agents}
         docs = load_open_docs()
         recents = load_recent_sessions(active_sids)
-        self.list.clear()
-        for data in agents:
-            sid = data.get("sessionId", "")
-            row = AgentRow(data, last_msgs.get(sid), last_recap(sid), session_meta(sid))
-            row.clicked.connect(self.raise_agent)
-            self._add_row(row)
-        if docs:
-            self._add_row(SectionRow("📌  Pick up — %d" % len(docs), accent=True))
+        agent_rows = [(data, last_msgs.get(data.get("sessionId", "")),
+                       last_recap(data.get("sessionId", "")),
+                       session_meta(data.get("sessionId", "")))
+                      for data in agents]
+        # Only rebuild when the content actually changed: a full rebuild every
+        # poll makes the (multi-column) layout flicker visibly.
+        sig = repr((agent_rows, docs, recents,
+                    [day_label(i["mtime"]) for i in recents],
+                    PREFS["scale"], PREFS["cols"]))
+        if sig == self._sig:
+            return self.count
+        self._sig = sig
+        cat_mode = PREFS["cols"] == 3
+        for l in lists:
+            l.clear()
+        if cat_mode:
+            for data, last_msg, recap, meta in agent_rows:
+                row = AgentRow(data, last_msg, recap, meta)
+                row.clicked.connect(self.raise_agent)
+                self._add_row(row, self.cat_lists[0])
             for doc in docs:
-                self._add_row(self._doc_row(doc))
-        prev_day = None
-        for info in recents:
-            lbl = day_label(info["mtime"])
-            if lbl != prev_day:
-                self._add_row(SectionRow(lbl))
-                prev_day = lbl
-            self._add_row(self._recent_row(info, last_msgs))
-        total = self.list.count()
-        self.list.setVisible(total > 0)
+                self._add_row(self._doc_row(doc), self.cat_lists[1])
+            prev_day = None
+            for info in recents:
+                lbl = day_label(info["mtime"])
+                if lbl != prev_day:
+                    self._add_row(SectionRow(lbl), self.cat_lists[2])
+                    prev_day = lbl
+                self._add_row(self._recent_row(info, last_msgs), self.cat_lists[2])
+            self._style_cat_headers((len(agent_rows), len(docs), len(recents)))
+        else:
+            for data, last_msg, recap, meta in agent_rows:
+                row = AgentRow(data, last_msg, recap, meta)
+                row.clicked.connect(self.raise_agent)
+                self._add_row(row)
+            if docs:
+                self._add_row(SectionRow("📌  Pick up — %d" % len(docs), accent=True))
+                for doc in docs:
+                    self._add_row(self._doc_row(doc))
+            prev_day = None
+            for info in recents:
+                lbl = day_label(info["mtime"])
+                if lbl != prev_day:
+                    self._add_row(SectionRow(lbl))
+                    prev_day = lbl
+                self._add_row(self._recent_row(info, last_msgs))
+        total = sum(l.count() for l in lists)
+        self.list.setVisible(not cat_mode and total > 0)
+        self.cats.setVisible(cat_mode and total > 0)
         self.empty.setVisible(total == 0)
         self._fit()
+        for l, pos in zip(lists, scroll_pos):
+            bar = l.verticalScrollBar()
+            bar.setValue(min(pos, bar.maximum()))
         return self.count
 
-    def _add_row(self, row):
-        item = QtWidgets.QListWidgetItem(self.list)
-        self.list.addItem(item)
-        self.list.setItemWidget(item, row)
-        w = self.list.viewport().width()
+    def _add_row(self, row, lst=None):
+        # Note: "lst or self.list" would misfire; an empty QListWidget is falsy.
+        if lst is None:
+            lst = self.list
+        item = QtWidgets.QListWidgetItem(lst)
+        lst.addItem(item)
+        lst.setItemWidget(item, row)
+        w = lst.cell_width()
         item.setSizeHint(QtCore.QSize(w, row.height_for_width(w)))
 
     def _doc_row(self, doc):
@@ -978,11 +1188,13 @@ class Dashboard(QtWidgets.QWidget):
         resize freely. The list gets a scrollbar once the content no longer fits."""
         if self._sized:
             return
-        if self.list.viewport().width() <= 1:
+        lists = self._visible_lists()
+        if lists[0].viewport().width() <= 1:
             return  # not laid out yet; showEvent/refresh retries later
-        self.list.relayout()
-        total = sum(self.list.item(i).sizeHint().height()
-                    for i in range(self.list.count())) + 2
+        for l in lists:
+            l.relayout()
+        total = max(sum(l.item(i).sizeHint().height() for i in range(l.count()))
+                    for l in lists) + 2
         screen = QtWidgets.QApplication.primaryScreen()
         avail = screen.availableGeometry().height() - 80 if screen else 900
         header_h = self.header.sizeHint().height()
