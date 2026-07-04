@@ -857,25 +857,8 @@ class AgentList(QtWidgets.QListWidget):
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                            QtWidgets.QSizePolicy.Expanding)
 
-    def apply_columns(self):
-        if PREFS["cols"] > 1:
-            self.setFlow(QtWidgets.QListView.LeftToRight)
-            self.setWrapping(True)
-            self.setResizeMode(QtWidgets.QListView.Adjust)
-            # Keep the scrollbar permanently visible: with it toggling on/off
-            # the viewport width oscillates and the wrap layout flickers.
-            self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
-        else:
-            self.setFlow(QtWidgets.QListView.TopToBottom)
-            self.setWrapping(False)
-            self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        self.relayout()
-
     def cell_width(self):
-        w = self.viewport().width()
-        if self.flow() == QtWidgets.QListView.LeftToRight:
-            return max(1, w // PREFS["cols"] - 1)
-        return w
+        return self.viewport().width()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -962,8 +945,26 @@ class Dashboard(QtWidgets.QWidget):
         outer.addWidget(bar)
 
         self.list = AgentList()
-        self.list.apply_columns()
         outer.addWidget(self.list, 1)
+
+        # Two-column view: two independent lists side by side, so the columns
+        # pack their rows without any vertical alignment between them.
+        self.two = QtWidgets.QWidget()
+        two_lay = QtWidgets.QHBoxLayout(self.two)
+        two_lay.setContentsMargins(0, 0, 0, 0)
+        two_lay.setSpacing(0)
+        self.two_lists = []
+        for i in range(2):
+            if i:
+                sep = QtWidgets.QFrame()
+                sep.setFixedWidth(1)
+                sep.setStyleSheet("background: #d0d7de;")
+                two_lay.addWidget(sep)
+            lst = AgentList()
+            self.two_lists.append(lst)
+            two_lay.addWidget(lst, 1)
+        self.two.setVisible(False)
+        outer.addWidget(self.two, 1)
 
         # Category view (3 columns): Active / Pick up / History side by side.
         self.cats = QtWidgets.QWidget()
@@ -1019,11 +1020,14 @@ class Dashboard(QtWidgets.QWidget):
     def set_cols(self, n):
         PREFS["cols"] = n
         save_prefs()
-        self.list.apply_columns()
         self.refresh()
 
     def _visible_lists(self):
-        return self.cat_lists if PREFS["cols"] == 3 else [self.list]
+        if PREFS["cols"] == 3:
+            return self.cat_lists
+        if PREFS["cols"] == 2:
+            return self.two_lists
+        return [self.list]
 
     def refresh(self):
         if QtWidgets.QApplication.activePopupWidget() is not None:
@@ -1070,23 +1074,30 @@ class Dashboard(QtWidgets.QWidget):
                 self._add_row(self._recent_row(info, last_msgs), self.cat_lists[2])
             self._style_cat_headers((len(agent_rows), len(docs), len(recents)))
         else:
+            rows = []
             for data, last_msg, recap, meta in agent_rows:
                 row = AgentRow(data, last_msg, recap, meta)
                 row.clicked.connect(self.raise_agent)
-                self._add_row(row)
+                rows.append(row)
             if docs:
-                self._add_row(SectionRow("📌  Pick up — %d" % len(docs), accent=True))
+                rows.append(SectionRow("📌  Pick up — %d" % len(docs), accent=True))
                 for doc in docs:
-                    self._add_row(self._doc_row(doc))
+                    rows.append(self._doc_row(doc))
             prev_day = None
             for info in recents:
                 lbl = day_label(info["mtime"])
                 if lbl != prev_day:
-                    self._add_row(SectionRow(lbl))
+                    rows.append(SectionRow(lbl))
                     prev_day = lbl
-                self._add_row(self._recent_row(info, last_msgs))
+                rows.append(self._recent_row(info, last_msgs))
+            if PREFS["cols"] == 2:
+                self._fill_two_columns(rows)
+            else:
+                for row in rows:
+                    self._add_row(row)
         total = sum(l.count() for l in lists)
-        self.list.setVisible(not cat_mode and total > 0)
+        self.list.setVisible(PREFS["cols"] == 1 and total > 0)
+        self.two.setVisible(PREFS["cols"] == 2 and total > 0)
         self.cats.setVisible(cat_mode and total > 0)
         self.empty.setVisible(total == 0)
         self._fit()
@@ -1094,6 +1105,23 @@ class Dashboard(QtWidgets.QWidget):
             bar = l.verticalScrollBar()
             bar.setValue(min(pos, bar.maximum()))
         return self.count
+
+    def _fill_two_columns(self, rows):
+        """Split the rows over the two columns at (roughly) half of the total
+        height, keeping reading order; a section header is not left dangling
+        at the bottom of the first column."""
+        w = self.two_lists[0].cell_width()
+        heights = [r.height_for_width(max(1, w)) for r in rows]
+        half, cum, split = sum(heights) / 2.0, 0, len(rows)
+        for i, h in enumerate(heights):
+            cum += h
+            if cum >= half:
+                split = i + 1
+                break
+        if split < len(rows) and isinstance(rows[split - 1], SectionRow):
+            split -= 1
+        for i, row in enumerate(rows):
+            self._add_row(row, self.two_lists[0 if i < split else 1])
 
     def _add_row(self, row, lst=None):
         # Note: "lst or self.list" would misfire; an empty QListWidget is falsy.

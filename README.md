@@ -77,19 +77,49 @@ document came from, via `claude --resume`.
 
 ## Optional integrations
 
+Ready-to-use scripts for both integrations live in `extras/`.
+
 - **Exact context percentage:** if your Claude Code statusline script writes
   `$XDG_RUNTIME_DIR/claude-agents-ctx-<sessionId>.json` with
   `{"pct": <context_window.used_percentage>}`, the dashboard shows that exact
   number for active sessions; otherwise it estimates from the transcript.
+  `extras/statusline.sh` does this, and also renders a statusline with a
+  context-usage bar and the 5-hour rate limit with its reset time:
+
+  ```
+  [Fable] context: ▓▓▓░░░░░░░ 34%  |  5h limit: 12% resets 14:00
+  ```
+
+  Enable it in `~/.claude/settings.json`:
+
+  ```json
+  "statusLine": { "type": "command", "command": "/path/to/extras/statusline.sh" }
+  ```
+
 - **Name fallback:** if a session has no name yet, the dashboard also looks at
-  `$XDG_RUNTIME_DIR/claude-konsole-title-<sessionId>` (useful if you already
-  mirror session names into your terminal title from a statusline hook).
+  `$XDG_RUNTIME_DIR/claude-konsole-title-<sessionId>`.
+  `extras/konsole-title.sh` writes that file and mirrors the session name into
+  the KDE Konsole tab/window title (so named sessions show up in the window
+  switcher). It is called automatically by `extras/statusline.sh`; also add it
+  as a `Stop` hook so the title survives when a session goes idle:
+
+  ```json
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "/path/to/extras/konsole-title.sh" } ] }
+    ]
+  }
+  ```
 
 ## Files
 
 - `dashboard.py` — the application
 - `icon.svg` — tray/app icon
 - `install.sh` — installs launcher + autostart and starts the app
+- `extras/statusline.sh` — example statusline (context bar, 5h limit + reset
+  time) that feeds the dashboard integrations above
+- `extras/konsole-title.sh` — statusline/Stop-hook helper for Konsole window
+  titles and the name-fallback file
 - `skills/pickup/SKILL.md` — the "document this for later" skill for Claude Code
 
 ## Limitations
