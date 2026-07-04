@@ -27,11 +27,13 @@ Choose the mode based on the arguments.
 
 2. Gather metadata in a single Bash call:
    ```bash
-   echo "$CLAUDE_CODE_SESSION_ID"; pwd; date -Is; date +%Y%m%d-%H%M
+   echo "$CLAUDE_CODE_SESSION_ID"; pwd; date -Is; date +%Y%m%d-%H%M; echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
    ```
 
-3. Register the document: write `~/.claude/pickups/<YYYYMMDD-HHMM>-<slug>.json`
-   with exactly these fields:
+3. Register the document: write
+   `<config dir>/pickups/<YYYYMMDD-HHMM>-<slug>.json` (the config dir is the
+   last line of the command above; normally `~/.claude`) with exactly these
+   fields:
    ```json
    {
      "title": "short title for the dashboard",
@@ -43,7 +45,7 @@ Choose the mode based on the arguments.
      "status": "open"
    }
    ```
-   Create `~/.claude/pickups/` if it does not exist yet.
+   Create the `pickups/` directory if it does not exist yet.
 
 4. Briefly report to the user: where the document lives, that it stays pinned
    in the dashboard under 📌 Pick up until checked off (right-click, "Mark as
@@ -52,7 +54,8 @@ Choose the mode based on the arguments.
 
 ## Mode 2: finish (arguments contain "done")
 
-1. Read all `~/.claude/pickups/*.json` with `"status": "open"`.
+1. Read all `<config dir>/pickups/*.json` with `"status": "open"`
+   (config dir: `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`).
 2. Determine which item is meant: the one belonging to this session/project,
    or the one named in the arguments. Show a short list and ask if it is
    ambiguous.

@@ -15,7 +15,8 @@ so you still know where you were after a reboot or days later:
   command*.
 - **Recent sessions** (Today / Yesterday / ...) — sessions from the last 7
   days that are no longer running, across all your projects. Clicking opens a
-  new Konsole in the project directory with `claude --resume <sessionId>`.
+  new terminal in the project directory with `claude --resume <sessionId>`
+  (Konsole, `$TERMINAL` or another common emulator, whichever is available).
 
 Runs as a background process in the **system tray** (KDE Plasma). Closing the
 window hides it to the tray; quit via the tray menu.
@@ -65,10 +66,14 @@ document came from, via `claude --resume`.
 
 ## Requirements
 
-- Linux with KDE Plasma (Konsole + KWin), Wayland or X11
-- `python3` with `PyQt5`
-- `qdbus6` (for raising windows)
-- Claude Code (the dashboard reads its session files under `~/.claude`)
+- Linux (Wayland or X11), `python3` with `PyQt5`
+- Claude Code — the dashboard reads its session files under `~/.claude`, or
+  `$CLAUDE_CONFIG_DIR` when that is set
+- Best on KDE Plasma: raising the window of an *active* agent needs KWin,
+  `qdbus6` and Konsole
+- Resuming recent sessions works with any of: Konsole, GNOME Terminal,
+  alacritty, kitty, foot, WezTerm, `x-terminal-emulator`, xterm, or whatever
+  `$TERMINAL` points to
 
 ## Optional integrations
 
@@ -86,6 +91,18 @@ document came from, via `claude --resume`.
 - `icon.svg` — tray/app icon
 - `install.sh` — installs launcher + autostart and starts the app
 - `skills/pickup/SKILL.md` — the "document this for later" skill for Claude Code
+
+## Limitations
+
+- Reads undocumented Claude Code internals: the live session registry,
+  `history.jsonl` and transcript record types (written against Claude Code
+  2.1.x). A future Claude Code release may change these formats.
+- Raising the window of an *active* agent uses KWin scripting and is
+  KDE-only; on other desktops that click is a no-op. Resuming recent
+  sessions works on any desktop with a supported terminal; if none is found,
+  the resume command is copied to the clipboard instead.
+- The UI is a fixed light theme.
+- On GNOME the system tray icon needs an AppIndicator extension.
 
 ## License
 

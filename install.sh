@@ -4,7 +4,7 @@
 # the app from this project directory. Idempotent.
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
-PY=/usr/bin/python3
+PY="$(command -v python3 || echo /usr/bin/python3)"
 APP=claude-agents-dashboard
 
 mkdir -p "$HOME/.local/share/applications" "$HOME/.config/autostart"
@@ -39,10 +39,13 @@ EOF
 
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 
-# Stop a possibly running instance (real python processes only).
+# Stop a possibly running instance: only python processes whose command line
+# points at this project's dashboard.py (never someone else's dashboard.py).
 for p in $(pgrep -f 'dashboard\.py' 2>/dev/null || true); do
   c=$(cat "/proc/$p/comm" 2>/dev/null || true)
-  case "$c" in python*) kill "$p" 2>/dev/null || true ;; esac
+  case "$c" in python*) ;; *) continue ;; esac
+  cl=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)
+  case "$cl" in *"$DIR/dashboard.py"*) kill "$p" 2>/dev/null || true ;; esac
 done
 sleep 1
 

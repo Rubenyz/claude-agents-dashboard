@@ -13,11 +13,11 @@ Below the active agents there are two "continue where you left off" sections:
   running, read from the transcripts. Clicking one opens a new Konsole in the
   project directory with `claude --resume <sessionId>`, even after a reboot.
 
-Data sources:
-- ~/.claude/sessions/<pid>.json  -> live registry per active session
-- ~/.claude/history.jsonl        -> your last typed message per session
-- ~/.claude/projects/*/<id>.jsonl -> recap, title, cwd (also of dead sessions)
-- ~/.claude/pickups/*.json       -> open "document this" items
+Data sources (all under ~/.claude, or $CLAUDE_CONFIG_DIR when set):
+- sessions/<pid>.json   -> live registry per active session
+- history.jsonl         -> your last typed message per session
+- projects/*/<id>.jsonl -> recap, title, cwd (also of dead sessions)
+- pickups/*.json        -> open "document this" items
 
 Runs as a background process in the system tray. Closing hides to the tray.
 """
@@ -39,10 +39,12 @@ from PyQt5 import QtCore, QtGui, QtNetwork, QtWidgets
 APP_ID = "claude-agents-dashboard"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(HERE, "icon.svg")
-SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
-HISTORY_PATH = os.path.expanduser("~/.claude/history.jsonl")
-PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
-PICKUPS_DIR = os.path.expanduser("~/.claude/pickups")
+CONFIG_DIR = (os.environ.get("CLAUDE_CONFIG_DIR")
+              or os.path.expanduser("~/.claude"))
+SESSIONS_DIR = os.path.join(CONFIG_DIR, "sessions")
+HISTORY_PATH = os.path.join(CONFIG_DIR, "history.jsonl")
+PROJECTS_DIR = os.path.join(CONFIG_DIR, "projects")
+PICKUPS_DIR = os.path.join(CONFIG_DIR, "pickups")
 TITLE_CACHE_DIR = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 RUN_DIR = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 POLL_MS = 2000
@@ -356,6 +358,37 @@ def claude_bin():
     return shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
 
 
+def terminal_argv(cwd, cmd):
+    """Command line for the first available terminal emulator, running cmd.
+
+    $TERMINAL wins when set; otherwise Konsole first (KDE is this tool's home
+    turf), then other common emulators. Callers should also pass cwd to Popen
+    for emulators that only inherit their working directory.
+    """
+    builders = {
+        "konsole": ["konsole", "--workdir", cwd, "-e"],
+        "gnome-terminal": ["gnome-terminal", "--working-directory=" + cwd, "--"],
+        "alacritty": ["alacritty", "--working-directory", cwd, "-e"],
+        "kitty": ["kitty", "--directory", cwd],
+        "foot": ["foot", "--working-directory=" + cwd],
+        "wezterm": ["wezterm", "start", "--cwd", cwd, "--"],
+        "x-terminal-emulator": ["x-terminal-emulator", "-e"],
+        "xterm": ["xterm", "-e"],
+    }
+    order = ["konsole", "gnome-terminal", "alacritty", "kitty", "foot",
+             "wezterm", "x-terminal-emulator", "xterm"]
+    term = os.path.basename(os.environ.get("TERMINAL") or "")
+    if term in builders:
+        order.remove(term)
+        order.insert(0, term)
+    elif term and shutil.which(term):
+        return [term, "-e"] + cmd  # unknown $TERMINAL: assume xterm-style -e
+    for name in order:
+        if shutil.which(name):
+            return builders[name] + cmd
+    return None
+
+
 def copy_resume_cmd(cwd, sid):
     QtWidgets.QApplication.clipboard().setText(
         "cd %s && claude --resume %s" % (shlex.quote(cwd or "."), sid))
@@ -367,7 +400,7 @@ def open_path(path):
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
+SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
 _settings_cache = {"mtime": None, "effort": None}
 
 
@@ -901,13 +934,19 @@ class Dashboard(QtWidgets.QWidget):
         return row
 
     def resume(self, cwd, sid):
-        """Open a new Konsole in the project directory and resume the session."""
-        cmd = ["konsole", "--workdir", cwd or os.path.expanduser("~"),
-               "-e", claude_bin()]
+        """Open a new terminal in the project directory and resume the session."""
+        if not (cwd and os.path.isdir(cwd)):
+            cwd = os.path.expanduser("~")  # project directory may be gone
+        cmd = [claude_bin()]
         if sid and glob.glob(os.path.join(PROJECTS_DIR, "*", "%s.jsonl" % sid)):
             cmd += ["--resume", sid]
+        argv = terminal_argv(cwd, cmd)
+        if argv is None:
+            # No known terminal emulator: at least hand over the command.
+            copy_resume_cmd(cwd, sid)
+            return
         try:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+            subprocess.Popen(argv, cwd=cwd, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
         except OSError:
             return
